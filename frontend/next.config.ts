@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   // Next.js will correctly use the lockfile in the frontend directory.
   // The turbopack.root option is not available in Next.js 16.0.1, so we can't suppress
   // this warning via config. It's safe to ignore.
+
+  turbopack: {
+    root: __dirname,
+  },
 };
 
 export default nextConfig;
