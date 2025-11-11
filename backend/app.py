@@ -177,10 +177,13 @@ def generate_meal_plan():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    print("=" * 50)
-    print("🚀 Starting Flask Backend Server")
-    print("=" * 50)
-    print("📍 Server running on http://localhost:5001")
-    print("🔧 CORS enabled for all origins")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("BACKEND SERVER")
+    print("=" * 60)
+    print("Status: Starting Flask Backend Server")
+    print("URL:    http://localhost:5001")
+    print("Host:   127.0.0.1")
+    print("Mode:   Debug")
+    print("CORS:   Enabled for all origins")
+    print("=" * 60 + "\n")
     app.run(debug=True, port=5001, host='127.0.0.1')
