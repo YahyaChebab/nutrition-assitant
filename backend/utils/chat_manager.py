@@ -82,30 +82,13 @@ Please provide all this information in your response, and I'll create a customiz
                 missing_text = ", ".join(missing_fields)
                 if len(missing_fields) == 1:
                     field = missing_fields[0]
-                    if field == 'Weekly budget':
-                        response = {
-                            'message': f"I need your weekly food budget. Please provide the amount (e.g., \"$100\" or \"100 CAD\" or \"my budget is $75 per week\").",
-                            'state': 'collecting_info',
-                            'user_data': extracted_data
-                        }
-                    elif field == 'Household size':
-                        response = {
-                            'message': f"How many people are you feeding? Please provide a number (e.g., \"4 people\" or \"feeding 4\").",
-                            'state': 'collecting_info',
-                            'user_data': extracted_data
-                        }
-                    elif field == 'Location':
-                        response = {
-                            'message': f"Which city are you shopping in? Please provide your location (e.g., \"Toronto\" or \"I'm in Chicago\").",
-                            'state': 'collecting_info',
-                            'user_data': extracted_data
-                        }
-                    else:
-                        response = {
-                            'message': f"I still need: {missing_text}. Could you provide that information?",
-                            'state': 'collecting_info',
-                            'user_data': extracted_data
-                        }
+                    # Use dynamic prompt with static fallback
+                    prompt_message = self._get_dynamic_prompt(field, extracted_data, session.get('conversation_history', []))
+                    response = {
+                        'message': prompt_message,
+                        'state': 'collecting_info',
+                        'user_data': extracted_data
+                    }
                 else:
                     response = {
                         'message': f"I'm still missing: {missing_text}. Could you provide these details?",
@@ -116,8 +99,10 @@ Please provide all this information in your response, and I'll create a customiz
                 # All info collected, show confirmation
                 # Double-check that budget is actually provided (not just a number)
                 if not extracted_data.get('budget'):
+                    # Use dynamic prompt with static fallback
+                    prompt_message = self._get_dynamic_prompt('Weekly budget', extracted_data, session.get('conversation_history', []))
                     response = {
-                        'message': "I need your weekly food budget to create a meal plan. Please provide the amount with a dollar sign or currency (e.g., \"$100\" or \"my budget is 100 CAD per week\").",
+                        'message': prompt_message,
                         'state': 'collecting_info',
                         'user_data': extracted_data
                     }
@@ -372,6 +357,63 @@ Please provide all this information in your response, and I'll create a customiz
                 user_data.get('people') and 
                 user_data.get('location') and
                 not session.get('meal_plan_generated', False))
+    
+    def _get_dynamic_prompt(self, field_name: str, user_data: Dict, conversation_history: List[Dict]) -> str:
+        """Generate dynamic prompt for missing field using API, with static fallback"""
+        # Static fallback prompts
+        static_prompts = {
+            'Weekly budget': "I need your weekly food budget. Please provide the amount (e.g., \"$100\" or \"100 CAD\" or \"my budget is $75 per week\").",
+            'Household size': "How many people are you feeding? Please provide a number (e.g., \"4 people\" or \"feeding 4\").",
+            'Location': "Which city are you shopping in? Please provide your location (e.g., \"Toronto\" or \"I'm in Chicago\")."
+        }
+        
+        # If no API key or test mode, use static version
+        if self.test_mode or not self.openai_client:
+            return static_prompts.get(field_name, f"I need your {field_name.lower()}. Could you provide that information?")
+        
+        try:
+            # Build context about what we already know
+            context_parts = []
+            if user_data.get('people'):
+                context_parts.append(f"Household size: {user_data.get('people')} people")
+            if user_data.get('budget'):
+                context_parts.append(f"Budget: ${user_data.get('budget')} CAD")
+            if user_data.get('location'):
+                context_parts.append(f"Location: {user_data.get('location')}")
+            
+            context = ". ".join(context_parts) if context_parts else "No information collected yet."
+            
+            system_message = """You are NutriBudget AI, a helpful nutrition assistant. Generate a friendly, natural prompt asking for missing information. 
+Keep it concise (1-2 sentences), friendly, and include helpful examples. Return only the prompt text, no additional explanation."""
+            
+            user_prompt = f"""The user is creating a meal plan. So far I know: {context}
+
+I need to ask for: {field_name}
+
+Generate a friendly, conversational prompt asking for this information. Include 1-2 examples of how they might respond. Keep it warm and helpful."""
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            dynamic_prompt = response.choices[0].message.content.strip()
+            # Remove quotes if the API wrapped it in quotes
+            if dynamic_prompt.startswith('"') and dynamic_prompt.endswith('"'):
+                dynamic_prompt = dynamic_prompt[1:-1]
+            elif dynamic_prompt.startswith("'") and dynamic_prompt.endswith("'"):
+                dynamic_prompt = dynamic_prompt[1:-1]
+            
+            return dynamic_prompt
+        except Exception as e:
+            # Fallback to static on any error
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Error generating dynamic prompt: {e}, using static fallback")
+            return static_prompts.get(field_name, f"I need your {field_name.lower()}. Could you provide that information?")
     
     def _get_gpt_response(self, conversation_history: List[Dict], user_data: Dict) -> Dict:
         """Get GPT response for general conversation"""
