@@ -258,6 +258,24 @@ def generate_meal_plan(self, user_data, ingredients, activity_log):
             "error": str(e)
         }
 
+    except Exception as e:
+        error_msg = f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Error during meal plan generation: {str(e)}"
+        activity_log.append(error_msg)
+        return {
+            "weekly_summary": {
+                "total_cost": 0,
+                "budget_utilization": "0%",
+                "currency": "CAD",
+                "serves": user_data.get("people", 1),
+                "location": user_data.get("location", "Unknown")
+            },
+            "grocery_list": [],
+            "total_grocery_cost": 0,
+            "meal_schedule": [],
+            "tips": [],
+            "error": str(e)
+        }
+
 if __name__ == '__main__':
     import socket
     
