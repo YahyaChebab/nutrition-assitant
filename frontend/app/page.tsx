@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { getBackendUrl } from "./api/config";
 
 interface Message {
   role: "user" | "assistant";
@@ -74,7 +75,7 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:5001/api/chat", {
+      const response = await fetch(`${getBackendUrl()}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -96,7 +97,8 @@ export default function Home() {
         setMessages((prev) => [...prev, aiMessage]);
       }
 
-      if (data.activity_log && Array.isArray(data.activity_log)) {
+      // Update activity log immediately if present in response
+      if (data.activity_log && Array.isArray(data.activity_log) && data.activity_log.length > 0) {
         setActivityLog(
           data.activity_log.map((msg: string) => ({
             message: msg,
@@ -109,8 +111,10 @@ export default function Home() {
         setMealPlan(data.meal_plan);
       }
 
-      // Poll for activity updates if meal plan is being generated
-      if (data.ready_for_meal_plan) {
+      // Start polling immediately when meal plan generation begins
+      // This happens right after user confirms their preferences
+      if (data.ready_for_meal_plan || data.status === "processing") {
+        // Start polling to get real-time activity log updates
         pollActivityLog();
       }
     } catch (error) {
@@ -118,7 +122,7 @@ export default function Home() {
       const errorMessage: Message = {
         role: "assistant",
         content:
-          "Sorry, I encountered an error. Please make sure the backend server is running on http://localhost:5001",
+          `Sorry, I encountered an error. Please make sure the backend server is running on ${getBackendUrl()}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -131,7 +135,7 @@ export default function Home() {
     const interval = setInterval(async () => {
       try {
         const response = await fetch(
-          `http://localhost:5001/api/activity_log?session_id=${sessionId}`
+          `${getBackendUrl()}/api/activity_log?session_id=${sessionId}`
         );
         const data = await response.json();
 
@@ -144,17 +148,24 @@ export default function Home() {
           );
         }
 
-        if (data.status === "complete") {
+        // Stop polling when complete or error
+        if (data.status === "complete" || data.status === "error") {
           clearInterval(interval);
+          
+          // If complete, fetch meal plan if available
+          if (data.status === "complete") {
+            // Meal plan should already be in the response from chat endpoint
+            // But we can also fetch it separately if needed
+          }
         }
       } catch (error) {
         console.error("Error polling activity log:", error);
         clearInterval(interval);
       }
-    }, 1000);
+    }, 500); // Poll every 500ms for faster updates
 
-    // Stop polling after 30 seconds
-    setTimeout(() => clearInterval(interval), 30000);
+    // Stop polling after 2 minutes (should be enough for meal plan generation)
+    setTimeout(() => clearInterval(interval), 120000);
   };
 
   const handleGetStarted = async () => {
@@ -169,7 +180,7 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:5001/api/chat", {
+      const response = await fetch(`${getBackendUrl()}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -212,7 +223,7 @@ export default function Home() {
       const errorMessage: Message = {
         role: "assistant",
         content:
-          "Sorry, I encountered an error. Please make sure the backend server is running on http://localhost:5001",
+          `Sorry, I encountered an error. Please make sure the backend server is running on ${getBackendUrl()}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -222,9 +233,9 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col">
+    <div className="h-screen bg-black flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="bg-black border-b border-white p-4">
+      <header className="bg-black border-b border-white p-4 flex-shrink-0">
         <h1 className="text-2xl font-bold text-white">
           AI Nutrition Assistant
           </h1>
@@ -233,11 +244,11 @@ export default function Home() {
         </p>
       </header>
 
-      <div className="flex-1 flex flex-col md:flex-row gap-4 p-4 overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row gap-4 p-4 overflow-hidden min-h-0">
         {/* Chat Interface */}
-        <div className="flex-1 flex flex-col bg-black border border-white rounded-lg overflow-hidden">
+        <div className="flex-1 flex flex-col bg-black border border-white rounded-lg overflow-hidden min-h-0 max-h-full">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
             {messages.length === 0 && (
               <div className="text-center py-12">
                 <h2 className="text-2xl font-bold text-white mb-2">
@@ -298,7 +309,7 @@ export default function Home() {
           {/* Input Form */}
           <form
             onSubmit={sendMessage}
-            className="border-t border-white p-4 bg-black"
+            className="border-t border-white p-4 bg-black flex-shrink-0"
           >
             <div className="flex gap-2 items-end">
               <textarea
@@ -322,29 +333,31 @@ export default function Home() {
           </form>
         </div>
 
-        {/* Activity Log & Meal Plan */}
-        <div className="w-full md:w-96 flex flex-col gap-4">
-          {/* Activity Log */}
-          {activityLog.length > 0 && (
-            <div className="bg-black border border-white rounded-lg p-4 overflow-hidden flex flex-col">
-              <h3 className="font-bold text-white mb-2">Activity Log</h3>
-              <div className="flex-1 overflow-y-auto space-y-2">
-                {activityLog.map((log, index) => (
-                  <div
-                    key={index}
-                    className="text-sm text-white bg-black border border-white p-2 rounded"
-                  >
-                    {log.message}
-                  </div>
-                ))}
-                <div ref={activityLogEndRef} />
+        {/* Activity Log & Meal Plan - Same height as chat container */}
+        <div className="w-full md:w-96 flex flex-col gap-4 min-h-0 max-h-full overflow-hidden">
+          {/* Combined container for Activity Log and Meal Plan */}
+          <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
+            {/* Activity Log */}
+            {activityLog.length > 0 && (
+              <div className="bg-black border border-white rounded-lg p-4 overflow-hidden flex flex-col" style={{ maxHeight: '35%', minHeight: '120px', flexBasis: '35%' }}>
+                <h3 className="font-bold text-white mb-2 flex-shrink-0">Activity Log</h3>
+                <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+                  {activityLog.map((log, index) => (
+                    <div
+                      key={index}
+                      className="text-sm text-white bg-black border border-white p-2 rounded"
+                    >
+                      {log.message}
+                    </div>
+                  ))}
+                  <div ref={activityLogEndRef} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Meal Plan Display */}
-          {mealPlan && (
-            <div className="bg-black border border-white rounded-lg p-4 overflow-y-auto flex-1 space-y-4">
+            {/* Meal Plan Display */}
+            {mealPlan && (
+              <div className={`bg-black border border-white rounded-lg p-4 overflow-y-auto space-y-4 ${activityLog.length > 0 ? 'flex-1 min-h-0' : 'flex-1 min-h-0'}`}>
               {/* Weekly Summary */}
               {mealPlan.weekly_summary && (
                 <div className="border border-white rounded-lg p-3 bg-black">
@@ -362,21 +375,26 @@ export default function Home() {
               {mealPlan.grocery_list && mealPlan.grocery_list.length > 0 && (
                 <div className="border border-white rounded-lg p-3 bg-black">
                   <h3 className="font-bold text-white mb-2">🛒 Grocery List</h3>
-                  <div className="space-y-1 text-xs max-h-40 overflow-y-auto">
+                  <div className="space-y-2 text-xs max-h-60 overflow-y-auto">
                     {mealPlan.grocery_list.slice(0, 15).map((item: any, index: number) => (
-                      <div key={index} className="text-gray-300 border-b border-gray-700 pb-1">
+                      <div key={index} className="text-gray-300 border-b border-gray-700 pb-2">
                         <p className="font-medium text-white">{item.ingredient}</p>
                         <p className="text-gray-400">
                           {item.quantity} {item.unit} - ${item.estimated_cost?.toFixed(2)}
                         </p>
+                        {item.store && (
+                          <p className="text-blue-300 text-xs mt-1">
+                            🏪 {item.store}
+                          </p>
+                        )}
+                        {item.store_address && (
+                          <p className="text-gray-500 text-xs mt-0.5">
+                            📍 {item.store_address}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
-                  {mealPlan.total_grocery_cost && (
-                    <p className="text-white font-semibold mt-2 text-sm">
-                      Total: ${mealPlan.total_grocery_cost.toFixed(2)}
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -445,7 +463,17 @@ export default function Home() {
                 </div>
               )}
             </div>
-          )}
+            )}
+            
+            {/* Empty state for right sidebar */}
+            {!mealPlan && activityLog.length === 0 && (
+              <div className="bg-black border border-white rounded-lg p-4 flex-1 flex items-center justify-center min-h-0">
+                <p className="text-gray-400 text-center">
+                  Your meal plan and activity log will appear here
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
